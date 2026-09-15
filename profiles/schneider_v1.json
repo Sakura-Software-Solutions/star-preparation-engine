@@ -1,0 +1,23 @@
+{
+  "profile_id": "schneider_v1",
+  "source_columns": {
+    "source_id": "Issue id",
+    "component": "Component/s",
+    "severity": "Priority",
+    "arrival_date": "Created",
+    "closure_date": "Resolved",
+    "found_in_version": "Affects Version/s (Found In)",
+    "status": "Status"
+  },
+  "normalization": {
+    "blank_values": ["", "none", "NO_FW_Version"]
+  },
+  "inclusion_rules": {
+    "statuses": ["Closed", "Delivered"],
+    "version_policy": {
+      "mode": "review_required",
+      "aliases": {},
+      "note": "An authorized software reliability engineer must approve the Schneider release/version cohort before an approved run."
+    }
+  }
+}

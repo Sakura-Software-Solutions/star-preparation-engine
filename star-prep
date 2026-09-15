@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Run the local engine directly when Python's venv/ensurepip package is absent.
+set -euo pipefail
+
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PYTHONPATH="$project_dir/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m star_preparation "$@"
