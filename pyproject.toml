@@ -7,10 +7,12 @@ name = "star-preparation-engine"
 version = "0.1.0"
 description = "Local, traceable preparation of customer defect data for STAR input."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = {text = "Proprietary"}
 authors = [{name = "Sakura Software Solutions"}]
-dependencies = []
+dependencies = [
+    "fastapi>=0.117.1",
+]
 
 [project.scripts]
 star-prep = "star_preparation.cli:main"
@@ -20,3 +22,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.vercel]
+entrypoint = "star_preparation.cloud_app:app"
