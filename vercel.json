@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "src/star_preparation/cloud_app.py": {
-      "excludeFiles": "{tests/**,runs/**,.venv/**}"
+      "excludeFiles": "{tests/**,runs/**,data/**,.venv/**}"
     }
   }
 }

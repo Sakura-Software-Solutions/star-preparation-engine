@@ -1,0 +1,6 @@
+{$STAR_HOST} {
+    request_body {
+        max_size 26214400
+    }
+    reverse_proxy app:8080
+}

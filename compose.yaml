@@ -1,0 +1,33 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - star-data:/var/lib/star
+    tmpfs:
+      - /tmp
+    expose:
+      - "8080"
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      STAR_HOST: ${STAR_HOST:?Set STAR_HOST to the internal HTTPS hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+volumes:
+  star-data:
+  caddy-data:
+  caddy-config:
