@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "profile_id": "schneider_poc_v2",
+  "source_columns": {
+    "source_id": "Issue ID",
+    "component": "Component/s",
+    "severity": "Priority",
+    "arrival_date": "Issue [3]",
+    "closure_date": "Issue [4]",
+    "found_in_version": "Version Name (Found  In)",
+    "status": "Issue Status"
+  },
+  "date_format": "iso",
+  "normalization": { "blank_values": ["", "none", "NO_FW_Version"] },
+  "inclusion_rules": {
+    "statuses": [],
+    "duplicate_policy": "review",
+    "version_policy": { "mode": "mapped", "aliases": {}, "accepted_values": [] }
+  },
+  "confirmations": {
+    "date": false,
+    "statuses": false,
+    "versions": false,
+    "duplicates": false
+  },
+  "release_dates": {},
+  "note": "Columns C and D both have the header Issue. Their positional mappings are hypotheses: C reported and D resolved. Confirm these meanings, statuses, release aliases and duplicate counting before export. The reference image is not approval."
+}

@@ -1,24 +1,463 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>STAR Preparation Admin</title><style>
-:root{font-family:Inter,system-ui,sans-serif;color:#172033;background:#f5f7fa}body{margin:0}.wrap{max-width:1100px;margin:auto;padding:32px}h1{margin:0 0 8px}p{color:#526075}.card{background:#fff;border:1px solid #dbe1ea;border-radius:10px;padding:22px;margin:18px 0;box-shadow:0 1px 2px #1720330c}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.wide{grid-column:1/-1}label{display:block;font-size:.86rem;font-weight:650;margin:0 0 5px}input,textarea,select,button{box-sizing:border-box;width:100%;font:inherit;padding:9px;border:1px solid #aeb9c9;border-radius:6px;background:#fff}textarea{min-height:90px}button{width:auto;background:#1b5e9b;color:#fff;border:0;cursor:pointer;font-weight:700}button.secondary{background:#edf2f8;color:#172033}button+button{margin-left:8px}.hint{font-size:.84rem;color:#66758a}.status{padding:12px;border-radius:7px;background:#eef4fa;white-space:pre-wrap}.warning{background:#fff3cd;color:#664d03}.ok{background:#d9f2e3;color:#155b32}a{color:#075da5}@media(max-width:700px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}}</style></head><body><main class="wrap">
-<h1>STAR Preparation Admin</h1><p>Local-only profile management and traceable STAR input preparation.</p>
-<section class="card"><h2>1. Schneider/profile rules</h2><div class="grid">
-<div><label>Saved profile</label><select id="profileSelect"></select></div><div><label>Profile file name</label><input id="fileName" value="schneider_v1.json"></div>
-<div><label>Profile ID</label><input id="profileId"></div><div><label>Version policy</label><select id="versionMode"><option value="review_required">Human review required</option><option value="allow_list">Allow-list</option><option value="ignore">Ignore version</option></select></div>
-<div class="wide"><label>Eligible statuses (one per line)</label><textarea id="statuses"></textarea></div><div class="wide"><label>Accepted versions (one per line; used by Allow-list)</label><textarea id="versions"></textarea></div>
-<div class="wide"><label>Version aliases — one per line: raw value <code>=&gt;</code> canonical value</label><textarea id="aliases" placeholder="UnityPro V15.1 IR11 =&gt; SW_UnityPro V15.1 OPR"></textarea></div>
-<div class="wide"><label>Source column mappings</label><div class="grid" id="mappings"></div></div>
-</div><p class="hint">Save changes before preparing data. `Human review required` is the safe default until an authorized engineer approves the release cohort.</p><button id="save">Save profile</button><span id="saveStatus" class="hint"></span></section>
-<section class="card"><h2>2. Prepare data</h2><label>Customer defect export (.xlsx or .csv)</label><input id="sourceFile" type="file" accept=".xlsx,.csv"><p class="hint">The uploaded raw file is preserved in its run folder and never modified.</p><button id="prepare">Prepare and validate</button><div id="result" class="status" style="display:none;margin-top:16px"></div></section>
-</main><script>
-const keys=['source_id','component','severity','arrival_date','closure_date','found_in_version','status'];let profile={};
-const $=id=>document.getElementById(id); const lines=s=>s.split('\n').map(v=>v.trim()).filter(Boolean);
-function renderMap(){ $('mappings').innerHTML=keys.map(k=>`<div><label>${k}</label><input data-map="${k}" value="${profile.source_columns?.[k]||''}"></div>`).join(''); }
-function fill(p,file){ profile=p; $('fileName').value=file||'profile.json';$('profileId').value=p.profile_id||'';$('statuses').value=(p.inclusion_rules?.statuses||[]).join('\n');const vp=p.inclusion_rules?.version_policy||{};$('versionMode').value=vp.mode||'review_required';$('versions').value=(vp.accepted_values||[]).join('\n');$('aliases').value=Object.entries(vp.aliases||{}).map(([a,b])=>`${a} => ${b}`).join('\n');renderMap(); }
-function collect(){let aliases={};lines($('aliases').value).forEach(x=>{let [a,...b]=x.split('=>');if(a&&b.length)aliases[a.trim()]=b.join('=>').trim()});let map={};document.querySelectorAll('[data-map]').forEach(x=>map[x.dataset.map]=x.value.trim());return {file_name:$('fileName').value.trim(),profile_id:$('profileId').value.trim(),source_columns:map,normalization:{blank_values:['','none','NO_FW_Version']},inclusion_rules:{statuses:lines($('statuses').value),version_policy:{mode:$('versionMode').value,accepted_values:lines($('versions').value),aliases}}}
-async function profiles(){let r=await fetch('/api/profiles');let d=await r.json();$('profileSelect').innerHTML=d.profiles.map(x=>`<option>${x}</option>`).join('');if(d.profiles.length){let n=d.profiles[0];fill(await (await fetch('/api/profiles/'+encodeURIComponent(n))).json(),n)}}
-$('profileSelect').onchange=async e=>{let n=e.target.value;fill(await (await fetch('/api/profiles/'+encodeURIComponent(n))).json(),n)};
-$('save').onclick=async()=>{let r=await fetch('/api/profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect())});let d=await r.json();$('saveStatus').textContent=r.ok?'Saved '+d.file_name:d.error;if(r.ok)await profiles()};
-$('prepare').onclick=async()=>{let f=$('sourceFile').files[0];if(!f){alert('Choose a CSV or XLSX file first.');return}let n=$('fileName').value.trim();let r=await fetch('/api/prepare?profile='+encodeURIComponent(n),{method:'POST',headers:{'X-Filename':f.name,'Content-Type':'application/octet-stream'},body:await f.arrayBuffer()});let d=await r.json(), box=$('result');box.style.display='block';if(!r.ok){box.className='status warning';box.textContent=d.error;return}let v=d.validation;box.className='status '+(v.approved?'ok':'warning');box.innerHTML=`Run ${d.run_id}\nRead: ${v.rows_read}; included: ${v.rows_included}; review required: ${v.rows_review_required}; excluded: ${v.rows_excluded}\n${v.approved?'Approved STAR input generated.':'Not approved: an authorized engineer must resolve the flagged rule(s).'}\n\n`+d.artifacts.map(a=>`<a href="${a.url}" download>${a.name}</a>`).join(' · ')};
-profiles();
-</script></body></html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>STAR · Preparation workspace</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div id="loginScreen" class="login hidden">
+      <form id="loginForm" class="card login-card">
+        <div class="brand-mark">S</div>
+        <h1>Welcome to STAR</h1>
+        <p>Sign in to your team's preparation workspace.</p>
+        <label for="username">Username</label
+        ><input id="username" autocomplete="username" required /><label
+          for="password"
+          >Password</label
+        ><input
+          id="password"
+          type="password"
+          autocomplete="current-password"
+          required
+        /><button type="submit">Sign in</button>
+        <p id="loginError" role="alert"></p>
+      </form>
+    </div>
+    <div id="workspace" class="shell hidden">
+      <aside>
+        <a class="brand" href="/"
+          ><span class="brand-mark">S</span
+          ><span>STAR<small>PREPARATION</small></span></a
+        >
+        <div class="nav-label">WORKSPACE</div>
+        <button class="nav active" id="newPreparation">
+          ＋ New preparation</button
+        ><button class="nav" id="historyButton">◷ Preparation history</button>
+        <div class="aside-bottom">
+          <span class="dot"></span> Private team workspace
+          <p>From customer exports<br />to reliable STAR inputs.</p>
+          <small id="identity"></small>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <span
+            >Data preparation /
+            <strong id="breadcrumb">New preparation</strong></span
+          >
+          <div class="header-account">
+            <span id="modeBadge" class="badge">Local workspace</span
+            ><button id="logout" class="link-button hidden">Sign out</button>
+          </div>
+        </header>
+        <div id="notice" class="notice hidden" role="alert"></div>
+        <section id="workflow">
+          <div class="page-heading">
+            <div>
+              <div class="eyebrow">PREPARE WITH CONFIDENCE</div>
+              <h1>Make your defect data ready.</h1>
+              <p>
+                A guided, traceable path from legacy exports to release-level
+                STAR data.
+              </p>
+            </div>
+            <button id="demoButton" class="secondary">
+              Try a synthetic example ↗
+            </button>
+          </div>
+          <nav class="steps" aria-label="Preparation steps">
+            <button data-step="1" class="selected">
+              <span>1</span> Source data</button
+            ><button data-step="2"><span>2</span> Map fields</button
+            ><button data-step="3"><span>3</span> Preparation rules</button
+            ><button data-step="4"><span>4</span> Review & export</button>
+          </nav>
+          <section id="step1" class="step">
+            <div class="card">
+              <div class="section-heading">
+                <div>
+                  <h2>Start with a customer export</h2>
+                  <p>
+                    CSV or Excel · up to 25 MiB · the original is retained with
+                    the decision trail
+                  </p>
+                </div>
+                <span class="badge">01 / SOURCE</span>
+              </div>
+              <label class="dropzone" id="dropzone" for="sourceFile"
+                ><span class="upload-symbol">↑</span
+                ><strong>Choose a file or drop it here</strong
+                ><span id="fileLabel"
+                  >Supports .csv and .xlsx, including multi-sheet
+                  workbooks</span
+                ><input id="sourceFile" type="file" accept=".csv,.xlsx"
+              /></label>
+              <div id="sourceControls" class="hidden">
+                <div class="grid four">
+                  <div>
+                    <label for="sheet">Worksheet</label
+                    ><select id="sheet"></select>
+                  </div>
+                  <div>
+                    <label for="headerRow">Header row</label
+                    ><input id="headerRow" type="number" min="1" value="1" />
+                  </div>
+                  <div>
+                    <label for="encoding">CSV encoding</label
+                    ><select id="encoding">
+                      <option value="utf-8-sig">UTF-8</option>
+                      <option value="cp1252">Windows-1252</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="delimiter">CSV separator</label
+                    ><select id="delimiter">
+                      <option value="auto">Detect automatically</option>
+                      <option value=",">Comma</option>
+                      <option value=";">Semicolon</option>
+                      <option value="&#9;">Tab</option>
+                      <option value="|">Pipe</option>
+                    </select>
+                  </div>
+                </div>
+                <button id="inspectAgain" class="secondary">
+                  Refresh inspection
+                </button>
+              </div>
+            </div>
+            <div id="inspection" class="hidden">
+              <div id="sourceStats" class="metrics"></div>
+              <div class="card">
+                <h2>Source preview</h2>
+                <p>
+                  Check the worksheet and header row before mapping your data.
+                  Blank rows are skipped.
+                </p>
+                <div class="table-scroll" id="sourcePreview"></div>
+              </div>
+              <div class="step-actions">
+                <span id="sourceHint"></span
+                ><button id="toMapping">Continue to field mapping →</button>
+              </div>
+            </div>
+          </section>
+          <section id="step2" class="step hidden">
+            <div class="card">
+              <div class="section-heading">
+                <div>
+                  <h2>Connect your columns</h2>
+                  <p>
+                    Suggested mappings are a starting point. Confirm the meaning
+                    of each field.
+                  </p>
+                </div>
+                <span class="badge">02 / MAPPING</span>
+              </div>
+              <div class="grid">
+                <div>
+                  <label for="profileSelect">Reuse a customer profile</label
+                  ><select id="profileSelect">
+                    <option value="">Suggested mappings</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="profileName">Customer profile name</label
+                  ><input id="profileName" value="customer" />
+                </div>
+              </div>
+              <p id="profileRevision" class="hint"></p>
+              <div id="mappings" class="mapping-grid"></div>
+              <div class="grid">
+                <div>
+                  <label for="dateFormat">Text date format</label
+                  ><select id="dateFormat">
+                    <option value="iso">ISO (YYYY-MM-DD) / Excel dates</option>
+                    <option value="dmy">Day/month/year</option>
+                    <option value="mdy">Month/day/year</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="blankValues"
+                    >Treat these values as missing (one per line)</label
+                  ><textarea id="blankValues" rows="3"></textarea>
+                </div>
+              </div>
+              <p class="hint">
+                Reported date and issue ID are required. Closure date, component
+                and severity may be blank. Excel numeric dates respect the
+                workbook's date system.
+              </p>
+            </div>
+            <div class="step-actions">
+              <button class="secondary" data-go="1">← Source data</button
+              ><button id="toRules">Continue to rules →</button>
+            </div>
+          </section>
+          <section id="step3" class="step hidden">
+            <div class="card">
+              <div class="section-heading">
+                <div>
+                  <h2>Define the defect cohort</h2>
+                  <p>
+                    Make counting and release decisions explicit. These rules
+                    are saved with every run.
+                  </p>
+                </div>
+                <span class="badge">03 / RULES</span>
+              </div>
+              <div class="grid">
+                <div>
+                  <label>Statuses to include</label>
+                  <div id="statusOptions" class="checks"></div>
+                  <p class="hint">
+                    Choose the statuses that belong in this analysis.
+                  </p>
+                </div>
+                <div>
+                  <label for="duplicateMode">Repeated issue IDs</label
+                  ><select id="duplicateMode">
+                    <option value="review">Flag repeated IDs for review</option>
+                    <option value="issue_release">
+                      One issue per release · earliest reported row
+                    </option>
+                    <option value="issue">
+                      One issue overall · earliest reported row
+                    </option>
+                    <option value="keep_all">Count every source row</option>
+                  </select>
+                  <p class="hint">
+                    Earliest-row rules retain the complete earliest record; they
+                    do not merge conflicting values. Source-row order breaks
+                    ties.
+                  </p>
+                  <label for="versionMode">Release policy</label
+                  ><select id="versionMode">
+                    <option value="mapped">
+                      Map every source version; review unknown values
+                    </option>
+                    <option value="allow_list">
+                      Only include selected releases
+                    </option>
+                    <option value="review_required">
+                      Await release-rule decision
+                    </option>
+                    <option value="ignore">Single cohort: all defects</option>
+                  </select>
+                  <div id="allowListWrap" class="hidden">
+                    <label for="acceptedVersions"
+                      >Accepted releases (one per line)</label
+                    ><textarea id="acceptedVersions"></textarea>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="section-heading">
+                <div>
+                  <h2>Group versions into releases</h2>
+                  <p>
+                    Map build labels to the release names you want in STAR.
+                    Blank mappings stay in review.
+                  </p>
+                </div>
+                <button id="suggestVersions" class="secondary">
+                  Suggest release names
+                </button>
+              </div>
+              <label for="versionSearch">Find a source version</label
+              ><input
+                id="versionSearch"
+                type="search"
+                placeholder="Search version labels"
+              />
+              <p id="versionHint" class="hint"></p>
+              <div class="table-scroll version-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Source version</th>
+                      <th>Rows</th>
+                      <th>Release name</th>
+                      <th>Exclude</th>
+                    </tr>
+                  </thead>
+                  <tbody id="versionRows"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card">
+              <h2>Release milestones</h2>
+              <p>
+                Optional dates appear as reference lines in the cumulative
+                chart.
+              </p>
+              <div id="milestones"></div>
+              <button id="addMilestone" class="secondary">
+                ＋ Add release date
+              </button>
+            </div>
+            <div class="card">
+              <h2>Confirm your interpretation</h2>
+              <p>
+                These confirmations apply to this profile. The source file or
+                reference chart alone cannot establish the counting rules.
+              </p>
+              <div class="checks">
+                <label
+                  ><input type="checkbox" data-confirm="date" /> The
+                  reported-date field and date format are correct.</label
+                ><label
+                  ><input type="checkbox" data-confirm="statuses" /> The
+                  selected statuses match the intended defect cohort.</label
+                ><label
+                  ><input type="checkbox" data-confirm="versions" /> The release
+                  mappings and exclusions are intentional.</label
+                ><label
+                  ><input type="checkbox" data-confirm="duplicates" /> The
+                  duplicate policy matches how issues should be counted.</label
+                >
+              </div>
+            </div>
+            <div class="step-actions">
+              <button class="secondary" data-go="2">← Field mapping</button>
+              <div>
+                <button id="saveProfile" class="secondary">
+                  Save profile version</button
+                ><button id="prepare">Prepare & review →</button>
+              </div>
+            </div>
+          </section>
+          <section id="step4" class="step hidden">
+            <div class="section-heading">
+              <div>
+                <h2>Review your prepared data</h2>
+                <p id="runCaption"></p>
+              </div>
+              <span id="approvalBadge" class="badge"></span>
+            </div>
+            <div id="runStats" class="metrics"></div>
+            <div id="validationMessages" class="notice"></div>
+            <div class="card">
+              <div class="section-heading">
+                <div>
+                  <h2>Cumulative defects by release</h2>
+                  <p>
+                    Validated included records only. Select a release below to
+                    inspect its contributing records.
+                  </p>
+                </div>
+                <button id="downloadChart" class="secondary">
+                  Download chart SVG
+                </button>
+              </div>
+              <div id="chart" class="chart"></div>
+              <div id="releaseLegend" class="legend"></div>
+            </div>
+            <div class="card">
+              <div class="section-heading">
+                <div>
+                  <h2>Record decisions</h2>
+                  <p>
+                    Every source row has a reason. Corrections create a new run
+                    and retain the original.
+                  </p>
+                </div>
+                <span id="pendingCorrections" class="badge"></span>
+              </div>
+              <div class="grid three">
+                <div>
+                  <label for="decisionFilter">Decision</label
+                  ><select id="decisionFilter">
+                    <option value="">All decisions</option>
+                    <option value="included">Included</option>
+                    <option value="review_required">Needs review</option>
+                    <option value="excluded">Excluded</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="releaseFilter">Release</label
+                  ><select id="releaseFilter">
+                    <option value="">All releases</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="recordSearch">Search records</label
+                  ><input
+                    id="recordSearch"
+                    type="search"
+                    placeholder="Issue ID, reason, status…"
+                  />
+                </div>
+              </div>
+              <div class="table-scroll" id="recordTable"></div>
+              <div class="pager">
+                <button id="prevPage" class="secondary">← Previous</button
+                ><span id="pageInfo"></span
+                ><button id="nextPage" class="secondary">Next →</button>
+              </div>
+            </div>
+            <div class="card">
+              <h2>Export & decision trail</h2>
+              <p id="exportHint"></p>
+              <div id="downloads" class="downloads"></div>
+              <details>
+                <summary>All artifacts & reproducibility details</summary>
+                <p id="runMetadata" class="hint"></p>
+                <div id="allArtifacts" class="downloads"></div>
+              </details>
+            </div>
+            <div class="step-actions">
+              <button class="secondary" data-go="3">← Adjust rules</button
+              ><button id="rerun">Apply corrections & create new run</button>
+            </div>
+          </section>
+        </section>
+        <section id="historySection" class="hidden">
+          <div class="page-heading">
+            <div>
+              <div class="eyebrow">YOUR TEAM'S WORK</div>
+              <h1>Preparation history</h1>
+              <p>
+                Open a previous run to inspect its profile, decisions and
+                exports.
+              </p>
+            </div>
+            <button id="refreshHistory" class="secondary">Refresh</button>
+          </div>
+          <div class="card table-scroll" id="historyTable"></div>
+        </section>
+        <footer>
+          STAR Preparation Engine
+          <span>Traceable transformations. Reproducible results.</span>
+        </footer>
+      </main>
+    </div>
+    <dialog id="editDialog">
+      <form id="editForm">
+        <div class="section-heading">
+          <h2 id="editTitle">Resolve record</h2>
+          <button type="button" id="closeDialog" class="secondary">
+            Close
+          </button>
+        </div>
+        <label for="resolutionAction">Action</label
+        ><select id="resolutionAction">
+          <option value="edit">Correct mapped values</option>
+          <option value="exclude">Exclude this record</option>
+        </select>
+        <div id="editFields" class="grid"></div>
+        <label for="resolutionReason">Reason for this change</label
+        ><textarea id="resolutionReason" required></textarea>
+        <p class="hint">
+          The original source is retained. Changes are validated when you create
+          the next run.
+        </p>
+        <button type="submit">Stage correction</button>
+      </form>
+    </dialog>
+    <div id="busy" class="busy hidden" role="status">Working…</div>
+  </body>
+</html>
