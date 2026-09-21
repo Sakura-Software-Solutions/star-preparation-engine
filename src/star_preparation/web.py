@@ -1,10 +1,13 @@
 """Local and authenticated shared HTTP adapters for one preparation application."""
 from __future__ import annotations
 
+import errno
+import ipaddress
 import json
 import mimetypes
 import os
 import socket
+import ssl
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,7 +29,7 @@ class Application:
         self.store = Store(data_dir or os.environ.get("STAR_DATA_DIR", PROJECT_ROOT / "data"))
         self.store.seed(PROJECT_ROOT / "profiles")
         if shared and (not secure_cookies or not self.store.has_users()):
-            raise ValueError("Shared mode requires secure cookies, HTTPS reverse proxy, and at least one provisioned user")
+            raise ValueError("Shared mode requires secure cookies, HTTPS (direct TLS or proxy), and at least one provisioned user; run user-add first")
 
     def response(self, method: str, target: str, headers: dict, body: bytes = b""):
         headers = {k.lower(): v for k, v in headers.items()}
@@ -132,9 +135,29 @@ class Application:
         return f"star_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={age}" + ("; Secure" if self.secure_cookies else "")
 
 
-def make_server(host="127.0.0.1", port=8080, *, application: Application):
+def validate_lan_host(host: str) -> None:
+    """Bind LAN mode to one private interface, never every/public interface."""
+    networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as error:
+        raise ValueError("--lan requires a numeric private LAN or VPN address in --host") from error
+    if not any(address in ipaddress.ip_network(network) for network in networks):
+        raise ValueError("--lan requires a private LAN/VPN IP; public, loopback and wildcard addresses are not allowed")
+
+
+def make_server(host="127.0.0.1", port=8080, *, application: Application, tls_cert=None, tls_key=None):
     if host not in {"localhost", "127.0.0.1", "::1"} and not application.shared:
-        raise ValueError("Non-loopback binding requires --shared, provisioned users and HTTPS proxy")
+        raise ValueError("Non-loopback binding requires --shared, provisioned users and HTTPS (direct TLS or proxy)")
+    if bool(tls_cert) != bool(tls_key):
+        raise ValueError("Supply both --tls-cert and --tls-key")
+    context = None
+    if tls_cert:
+        if not application.secure_cookies:
+            raise ValueError("Direct HTTPS requires secure cookies")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(tls_cert, tls_key)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -167,17 +190,50 @@ def make_server(host="127.0.0.1", port=8080, *, application: Application):
         do_POST = handle_request
 
     class Server(ThreadingHTTPServer):
-        address_family = socket.AF_INET6 if host == "::1" else socket.AF_INET
+        address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
+
+        def get_request(self):
+            connection, address = super().get_request()
+            if context:
+                # The worker performs the handshake, so one slow client cannot
+                # block the main accept loop. Bound the worker's handshake wait.
+                try:
+                    connection.settimeout(10)
+                    connection = context.wrap_socket(connection, server_side=True, do_handshake_on_connect=False)
+                except Exception:
+                    connection.close()
+                    raise
+            return connection, address
 
     return Server((host, port), Handler)
 
 
-def serve(host="127.0.0.1", port=8080, *, data_dir=None, shared=False, secure_cookies=False):
+def serve(host="127.0.0.1", port=8080, *, data_dir=None, shared=False, secure_cookies=False,
+          lan=False, tls_cert=None, tls_key=None):
+    if lan:
+        validate_lan_host(host)
+        if not tls_cert or not tls_key:
+            raise ValueError("--lan requires --tls-cert and --tls-key for HTTPS")
+        shared = secure_cookies = True
+    if tls_cert:
+        secure_cookies = True
     application = Application(data_dir, shared=shared, secure_cookies=secure_cookies)
-    server = make_server(host, port, application=application)
-    print(f"STAR Preparation: http://{host}:{port} ({'shared / HTTPS proxy required' if shared else 'local'})", flush=True)
+    try:
+        server = make_server(host, port, application=application, tls_cert=tls_cert, tls_key=tls_key)
+    except OSError as error:
+        if error.errno == errno.EADDRINUSE:
+            raise ValueError(f"Port {port} is already in use on {host}; stop the existing server or choose --port {port + 1}") from error
+        if error.errno == errno.EADDRNOTAVAIL:
+            raise ValueError(f"{host} is not assigned to this machine; choose its private LAN/VPN address") from error
+        raise
+    scheme = "https" if tls_cert else "http"
+    address = f"[{host}]" if ":" in host else host
+    mode = "shared / sign-in required" if shared and tls_cert else "shared / HTTPS proxy required" if shared else "local"
+    print(f"STAR Preparation: {scheme}://{address}:{server.server_address[1]} ({mode})", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:
         server.serve_forever()
+    except KeyboardInterrupt:
+        pass
     finally:
         server.server_close()

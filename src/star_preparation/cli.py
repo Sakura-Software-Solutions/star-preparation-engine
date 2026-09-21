@@ -21,12 +21,15 @@ def main() -> int:
     prepare_command.add_argument("input")
     prepare_command.add_argument("--profile", required=True)
     prepare_command.add_argument("--output", required=True)
-    serve_command = commands.add_parser("serve", help="Run the local preparation admin UI")
+    serve_command = commands.add_parser("serve", help="Run the local or authenticated shared dashboard")
     serve_command.add_argument("--host", default="127.0.0.1")
-    serve_command.add_argument("--port", default=8080, type=int)
+    serve_command.add_argument("--port", type=int, help="Default: 8080 locally, 8443 with --lan")
     serve_command.add_argument("--data-dir", default=os.environ.get("STAR_DATA_DIR"))
     serve_command.add_argument("--shared", action="store_true")
     serve_command.add_argument("--secure-cookies", action="store_true")
+    serve_command.add_argument("--lan", action="store_true", help="Authenticated HTTPS on the private LAN/VPN IP specified by --host")
+    serve_command.add_argument("--tls-cert", help="PEM server certificate, valid for the chosen IP or hostname")
+    serve_command.add_argument("--tls-key", help="PEM private key for the server certificate")
     user_command = commands.add_parser("user-add", help="Provision or reset an internal account")
     user_command.add_argument("username")
     user_command.add_argument("--role", choices=["viewer", "preparer", "admin"], default="preparer")
@@ -43,8 +46,12 @@ def main() -> int:
     if arguments.command == "serve":
         from .web import serve
 
-        serve(host=arguments.host, port=arguments.port, data_dir=arguments.data_dir,
-              shared=arguments.shared, secure_cookies=arguments.secure_cookies)
+        try:
+            serve(host=arguments.host, port=arguments.port if arguments.port is not None else 8443 if arguments.lan else 8080,
+                  data_dir=arguments.data_dir, shared=arguments.shared, secure_cookies=arguments.secure_cookies,
+                  lan=arguments.lan, tls_cert=arguments.tls_cert, tls_key=arguments.tls_key)
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
         return 0
     if arguments.command in {"user-add", "purge"}:
         from .store import Store

@@ -17,6 +17,10 @@ Open **http://127.0.0.1:8080**. Choose **Try a synthetic example** to walk
 through the complete flow without customer data. Local mode is passwordless
 and restricted to loopback. For shared team access, follow [DEPLOYMENT.md](DEPLOYMENT.md).
 
+For a machine on your office/home network, see [LAN.md](LAN.md). The new
+`serve --lan --host <private-IP> --tls-cert <certificate> --tls-key <key>`
+mode provides direct HTTPS and sign-in on port 8443 without Docker.
+
 The dashboard stores private files and metadata in ignored `data/`.
 Use `--data-dir /private/persistent/path` or `STAR_DATA_DIR` to choose another
 location. Profiles in the repository are starter templates, imported on first

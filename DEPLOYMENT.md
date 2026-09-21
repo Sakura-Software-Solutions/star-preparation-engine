@@ -9,6 +9,9 @@ included Vercel ASGI adapter refuses preparation on Vercel: ephemeral local
 disk and the presence of a Blob token alone do not satisfy this implementation's
 storage requirements.
 
+For direct HTTPS on a private LAN/VPN address without a reverse proxy or
+Docker, follow [LAN.md](LAN.md). Existing proxy deployments remain supported.
+
 ## Container deployment
 
 Included files: `Dockerfile`, `compose.yaml`, and `Caddyfile`. The app
